@@ -1,0 +1,198 @@
+﻿SOMBRA DIGITAL DE USINA DIESEL ISOLADA - COMO REPRODUZIR AS SIMULACOES (AP1)
+================================================================================
+(versao atualizada: configuracoes numericas de C5 e C6, criterio G2, sensibilidade de H)
+ 
+1. REQUISITOS
+- MATLAB R2024b com Simulink e Simscape Electrical (Specialized Power Systems).
+- Uma unica pasta com: o modelo (.slx), curva_carga_24h.csv, metricas_evento.m,
+  grafico_evento.m e rodar_sensibilidade_H.m. Essa pasta deve ser a "Current Folder" do MATLAB.
+  (dados_cenarios.m fica na pasta como copia de referencia; ver abaixo.)
+- O conteudo de dados_cenarios.m esta COLADO DENTRO DO InitFcn do modelo
+  (Modeling > Model Settings > Model Properties > Callbacks > InitFcn). Ou seja, o que vale
+  para a simulacao e o texto do InitFcn, e NAO o arquivo dados_cenarios.m da pasta.
+  TODA alteracao (cenario, Pm0_est, H_maq etc.) deve ser feita no InitFcn. Se alterar so o
+  arquivo .m, o modelo nao muda. Mantenha o .m igual ao InitFcn.
+ 
+2. COMO O MODELO FUNCIONA (resumo)
+- Usina: 40 geradores UTE 550 (503 kVA) em 10 blocos de 4, representados por UMA maquina
+  sincrona equivalente de 20,12 MVA referida a 13,8 kV, mais transformador equivalente
+  (10 em paralelo), duas linhas (LT-1 2 km e LT-2 3 km), tres cargas (50/30/20 %) e,
+  na barra 4, a carga da festividade (2 MW) com banco de capacitores de 2 Mvar.
+- O bloco de reserva (4 geradores) nao é um ramo fisico, a maquina e o transformador sao
+  reparametrizados para N_sim blocos (N_sim = 10 ou 9), Secao 13 do script.
+- TODOS os cenarios sao escolhidos em UM lugar: Secao 0 do script que esta no InitFcn do
+  modelo, variavel 'cenario' ('C1', 'C2', 'C3', 'C5' ou 'C6'). Nao edite outras partes do script.
+- Governor (Tabela 8): PID Kp = 2, Ki = 0,5, Kd = 0; saida do PID limitada a +-0,3 pu;
+  Pref = 0,75 pu; limitador de taxa +-0,5 pu/s; filtro 1/(s+1); Pm limitado a 0 - 1,1 pu.
+  (Kp = 4 e Ki = 1,5 oscilam com amplitude crescente no C5: nao usar.)
+ 
+3. CONFIGURACAO NUMERICA POR CENARIO
+ Os cenarios foram simulados com configuracoes diferentes.
+ Trocar entre Continuous e Discrete muda o powergui e o solver: ao mudar de cenario, confira os dois.
+ - C1 e C3: solver de passo VARIAVEL ode23tb, powergui em modo Continuous (Max Step Size = 5e-3 e
+   Relative Tolerance = 1e-3 com os get_param abaixo). Sem simulacao de sensibilidade de H.
+ - C2: valores horarios por Load Flow hora a hora (nao e simulacao dinamica de 20 s).
+ - C5: powergui em modo DISCRETE, Ts = 5e-5 s, solver de passo fixo
+   (get_param('NOME_DO_MODELO','Solver') no Command Window).
+ - C6: solver de passo VARIAVEL ode23tb, MaxStep = 1e-4 s, RelTol = 1e-4, Stop time = 20 s
+   (powergui em modo Continuous). O C6 em modo Discrete (Ts = 5e-5) DIVERGE numericamente
+   (frequencia da ordem de 1e9 Hz desde t = 0, nos quatro valores de H). Os testes de
+   inicializacao (Load Flow refeito, simulacao sem o degrau, conferencia do ramo do degrau e
+   dos blocos da maquina e do trafo) nao resolveram. Por isso o C6 usa o solver variavel e
+   seus resultados so devem ser comparados ao C5 de forma qualitativa.
+ - Com solver variavel e MaxStep = 1e-4 s, o MATLAB/Simulink travou e fechou no C5 perto do
+   fim da simulacao (alto uso de memoria no laco de sensibilidade). Se acontecer de novo:
+   use diary on para gravar a saida, rode um H por sessao e evite acumular resultados.
+ - Para conferir os parametros do modelo:
+      m = 'NOME_DO_MODELO';
+      get_param(m,'SolverType'), get_param(m,'Solver'), get_param(m,'FixedStep')
+      get_param(m,'MaxStep'), get_param(m,'RelTol'), get_param(m,'StopTime')
+ - Scope da velocidade: em Logging, DESMARQUE "Limit data points to last" (o padrao guarda so
+   os ultimos 5000 pontos e corta o nadir).
+ 
+4. PASSOS COMUNS A TODO CENARIO
+ 1) Abra o InitFcn do modelo (Modeling > Model Settings > Model Properties > Callbacks >
+    InitFcn), va ate a Secao 0, escolha o cenario (ex.: cenario = 'C5';), clique OK/Apply e
+    salve o modelo.
+ 2) Confira a troca: no Command Window, eval(get_param('NOME_DO_MODELO','InitFcn'))
+    (confira a linha "=== Cenario ... "). O InitFcn tambem roda ao atualizar o diagrama
+    (Ctrl+D) e ao iniciar a simulacao.
+ 3) Load Flow: Apps > powergui > Load Flow > Update > Compute > Apply.
+    - A maquina deve estar como "swing" (V = 1,00 pu, angulo 0).
+    - Se aparecer a mensagem "cannot set automatically the initial condition of the signal
+      connected to the Pm input ... set it to X pu": clique OK. Esse X e o Pm inicial.
+      Ele ja esta no script (Pm0_est, Secao 0 do InitFcn); se X for diferente em mais de 0,005,
+      troque o numero Pm0_est do cenario na Secao 0 do InitFcn e atualize o modelo (Ctrl+D).
+      Valores obtidos: C5 = 0,621859 pu ; C6 = 0,691459 pu (maquina de 9 blocos, 18,108 MVA);
+      C3 = 0,730088 pu
+    - Se aparecer a lista de "linked blocks with parameterized links": FECHE a janela.
+      NAO clique em Restore nem Push.
+    - Refaca o Load Flow SEMPRE que trocar de cenario (as condicoes iniciais ficam gravadas
+      nos blocos; o C6 usa maquina e trafo de 9 blocos).
+ 4) Simule (Stop time: 20 s).
+ 5) Resultados: velocidade do rotor no scope "Rotor speed wm (pu)", potencia Peo e Pm.
+ 
+5. CENARIOS
+ C1 - Caso base (12 MW constantes)
+    - Ramo da festa (carga, disjuntor e banco) COMENTADO (Ctrl+Shift+X) durante o Load Flow
+      e durante a simulacao.
+    - Esperado no Load Flow: V = 1,000 / 0,9805 / 0,9537 / 0,9374 (barras 1 a 4);
+      potencia da maquina = 12,46 MW (12,4586 MW no powergui). Simulacao de 20 s sem eventos:
+      Peo = 0,619 pu (12,46 MW), Pm = 0,622 pu, velocidade = 1,000 pu constante.
+ C2 - Curva de 24 h (perfil do CSV)
+    - Os valores horarios sao obtidos por Load Flow hora a hora (Secao 3.5 do trabalho).
+      Resultados completos na AP2.
+ C3 - Festividade em regime (14 MW, banco ligado)
+    - Ramo da festa DESCOMENTADO. No bloco Three-Phase Breaker da festa:
+        Initial status = closed  (a caixa de selecao nao aceita variavel: ajustar a mao)
+        Switching times (s) = t_fest_sim  (no C3 vale 1e3 s: o disjuntor nao chaveia)
+      ERRO COMUM: colocar fest_estado_ini no campo Switching times e deixar o Initial status
+      como open. O ramo da festa fica isolado (disjuntor aberto) e o Load Flow nao converge;
+      alem disso, com Switching times = 1 o disjuntor chaveia em t = 1 s durante a simulacao.
+    - Load Flow com a festa presente (nao ha barra isolada). Pm0 = 0,730088 pu (mensagem do
+      powergui). Referencia anterior (medida no C5): Peo = 0,713 pu (14,35 MW), tensao da
+      barra 4 = 0,938 pu, Pm = 0,717 pu. O Pm0 do Load Flow e maior que o 0,717: conferir na
+      simulacao de 20 s que a velocidade fica em 1,000 pu constante.
+    - O C3 e simulado com solver variavel ode23tb (Secao 3).
+ C4 - Somente rodar o MascaraDigitalC4.slx com cenário C1 no InitFcn (bloco Three-Phase Fault descomentado).
+ C5 - Degrau da festividade (12 -> 14 MW)
+    - Load Flow com o ramo da festa COMENTADO (como C1): Compute > Apply (Pm0 = 0,621859 pu).
+      Depois do Apply, DESCOMENTE o ramo da festa (carga + disjuntor + banco)
+      e NAO refaca o Compute. Disjuntor: Initial status = open, Switching times = t_fest_sim (1 s).
+    - Modo Discrete, Ts = 5e-5 s (Secao 3 acima). Simule 20 s. Metricas: Secao 6.
+    - ATENCAO AO INSTANTE DO EVENTO: nos graficos do C5 em modo discreto a queda de frequencia
+      comeca em t = 0 (eixo do tempo relativo ao evento), e nao em t = 1 s. Confira em qual
+      instante a frequencia comeca a cair e use esse valor como t0 em metricas_evento
+      (t0 = 0 nos resultados abaixo). Com t0 errado, RoCoF, trec e nadir saem errados.
+    - Resultado de referencia (H = 1,2 s; PID Kp = 2, Ki = 0,5; limitador 0,5 pu/s):
+        solver original (referencia anterior): nadir 56,88 Hz; RoCoF 2,22 Hz/s; trec 4,56 s.
+        modo discreto, Ts = 5e-5 s (usado na Tabela 12): nadir 56,94 Hz; RoCoF 2,17 Hz/s;
+        trec 4,54 s; sobressinal 0,13 Hz; Peo final 0,713 pu.
+ C6 - Perda de um bloco (maquina de 9 blocos + degrau de 1,435 MW em t = 1 s)
+    - cenario = 'C6' (o script ajusta N_sim = 9: maquina de 18,108 MVA e trafo de 18,5 MVA).
+    - Ramo da festa COMENTADO (carga, disjuntor e banco), como no C1.
+    - A perda do bloco e representada por um degrau de carga: Three-Phase Parallel RLC Load (so R:
+      QL = 0 e QC = 0; Y aterrado, Vn = Vn_carga, P = P_degrau) ligado ao barramento da maquina
+      (BG1) por um Three-Phase Breaker (Initial state = 0, Transition times = t_degrau_sim; fecha
+      em 1 s). Fora do C6 o tempo de transicao e 1e3 s (o breaker nao fecha).
+    - Load Flow: com o ramo do degrau (carga + breaker) COMENTADO, porque a carga atras do breaker
+      aberto forma uma barra isolada e o Load Flow nao converge. Compute > Apply; Pm esperado
+      0,691459 pu. Depois do Apply, DESCOMENTE o ramo do degrau e NAO refaca o Compute.
+    - Solver de passo VARIAVEL ode23tb (Secao 3 acima); o modo Discrete diverge no C6.
+    - Simule 20 s; o degrau fecha em t = 1 s (usar t0 = 1 em metricas_evento).
+      A maquina de 9 blocos passa a suprir mais 1,435 MW.
+    - Aproximacao: o estado inicial e o do caso base (12 MW) com 9 blocos, e nao o de 14 MW.
+    
+ 
+6. METRICAS (nadir, RoCoF, tempo de recuperacao)
+ a) No scope da velocidade (Speed (pu): Settings > Logging > "Log data to workspace", nome ScopeData,
+    formato "Structure With Time", com "Limit data points to last" DESMARCADO. Rode a simulacao.
+ b) No Command Window:
+      t = ScopeData.time;  w = ScopeData.signals.values;
+      m = metricas_evento(t, w, t_evento, fn, [0.5 G2_banda_rec]);
+      atende = (m.nadir_Hz >= G2_f_min) && (m.trec_s(2) <= G2_t_rec)
+    (t_evento = instante em que a frequencia comeca a cair: 1 no C6; 0 nos graficos do C5
+     em modo discreto. Ver Secao 5.)
+ c) Grafico: grafico_evento(t, w, fn, G2_f_min, G2_f_banda, 'C5_frequencia.png')
+ Definicoes: nadir = menor frequencia depois do evento; RoCoF = inclinacao da frequencia entre
+ 0,1 e 0,5 s apos o evento; trec = tempo, contado do evento, ate a frequencia ficar
+ definitivamente dentro da faixa de +-2 % (+-1,2 Hz) em torno de 60 Hz.
+ Criterio G2 (ISO 8528-5): queda ate 10 % (nadir >= 54,0 Hz) E trec <= 5 s.
+ Cuidado: com oscilacao sustentada (H = 0,5 s no C5) o "nadir" de metricas_evento e o minimo de
+ TODO o registro (46,34 Hz), e nao o da primeira queda (53,62 Hz). Para a primeira queda usar:
+      f = fn*w;  min(f(t >= t0 & t <= t0+5))
+ 
+7. SENSIBILIDADE DA INERCIA (H)
+ Manual: no InitFcn do modelo, Secao 4, troque H_maq (0,5; 1,0; 1,2; 1,5), atualize o modelo
+ (Ctrl+D), simule o evento (C5 ou C6) e calcule as metricas. Nao precisa refazer o Load Flow.
+ Lembre de voltar H_maq para 1,2 s no InitFcn depois dos testes.
+ Automatico: com o cenario escolhido no InitFcn, o Load Flow aplicado e os ramos do evento
+ descomentados, execute rodar_sensibilidade_H no Command Window; ele le o InitFcn do modelo
+ (eval(get_param(mdl,'InitFcn'))) e roda H = 0,5; 1,0; 1,2 e 1,5 e imprime a
+ tabela (H, nadir, RoCoF, trec 2 %, sobressinal, atende). Observacoes:
+ - A figura gerada usa as curvas guardadas em 'curvas'. Abra "figure; hold on" antes dos plots
+   para nao acumular curvas na legenda (data1, data2...) e use ylim([44 66]) para mostrar a
+   oscilacao inteira de H = 0,5 s.
+ - O script chama metricas_evento com t_evento (1 s). Se a queda comecar em t = 0 (C5 discreto),
+   recalcule com t0 = 0 a partir de 'curvas':
+      for i = 1:4
+          t = curvas{i}(:,1);  w = curvas{i}(:,2)/fn;
+          m = metricas_evento(t, w, 0, fn, [0.5 G2_banda_rec]);
+      end
+ - O ScopeData nao fica no workspace apos o laco (so em simOut dentro do laco).
+ - No C6 (solver variavel) rode H por H, manualmente, se o laco travar.
+ 
+8. RESULTADOS REGISTRADOS (Tabela 12 do trabalho)
+ C5 - modo discreto, Ts = 5e-5 s, t0 = 0
+   H (s)  nadir (Hz)  RoCoF (Hz/s)  trec 2 % (s)  sobressinal (Hz)  atende G2
+    0,5   53,62 (1a queda; minimo global 46,34)  5,12   > 20 (nao recupera)  11,19   nao
+    1,0   56,69   2,58   4,10   0,11   sim
+    1,2   56,94   2,17   4,54   0,13   sim
+    1,5   57,20   1,75   5,13   0,19   nao (trec > 5 s)
+ C6 - solver variavel ode23tb (Contínuos), MaxStep 1e-4 s, t0 = 1
+   H (s)  nadir (Hz)  RoCoF (Hz/s)  trec 2 % (s)  atende G2
+    0,5   ~55,0   4,83   ~6,8   nao (trec > 5 s)
+    1,0   ~57,1   2,42   ~3,7   sim
+    1,2   ~57,4   2,01   ~4,3   sim
+    1,5   ~57,6   1,61   ~5,0   limite
+ RoCoF calculado (Anexo A.16): escalado por 1/H a partir de H = 1,2 s (C5: 2,35 Hz/s;
+ C6: ~1,95 Hz/s). Em todos os casos H x RoCoF e aproximadamente constante.
+ 
+9. CUIDADOS CONHECIDOS
+ - Limite do PID: Pm so varia entre 0,45 e 1,05 pu (Pref 0,75 +- 0,3). Por isso as simulacoes
+   dinamicas partem de 12 MW ou mais.
+ - Estado inicial do filtro do governor (State-Space) = Pm0_gov; saida inicial do PID = PID_int0.
+   Pm0_gov = Pm0_est (Secao 0 de dados_cenarios.m).
+ - A carga da festa e de impedancia constante: a potencia absorvida depende da tensao (~1,75 MW).
+ - Ganhos Kp = 4 e Ki = 1,5 oscilam com amplitude crescente no C5; usar Kp = 2 e Ki = 0,5.
+ - H = 0,5 s: o governor perde amortecimento (oscilacao sustentada no C5 discreto). Com solver
+   variavel a oscilacao pode aparecer amortecida pelo solver: nao comparar os dois solvers
+   diretamente.
+ - O Initial status do disjuntor da festa nao aceita variavel: ao trocar de cenario, ajuste
+   a mao (C3 = closed; C5 = open com Switching times = t_fest_sim; C1 e C6 = ramo comentado).
+ - Trocar de cenario exige refazer o Load Flow (Secao 4, passo 3) e editar o 'cenario' no
+   InitFcn (e nao no arquivo dados_cenarios.m).
+ - O InitFcn roda a cada simulacao: o script usa readtable('curva_carga_24h.csv'), entao o CSV
+   precisa estar na Current Folder.
+ - O comando set_param/rodar_sensibilidade_H.m NAO foi validado em todos os modos: se der erro,
+   rode manualmente (Secao 7).
